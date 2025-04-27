@@ -103,8 +103,16 @@ class SpringItem(qtw.QGraphicsItem):
         if self.pen is not None:
             painter.setPen(self.pen)
         painter.setBrush(qtc.Qt.NoBrush)
-        # Simplified drawing to avoid crashes
-        painter.drawLine(self.x1, self.y1, self.x2, self.y2)
+        dx = (self.x2 - self.x1) / 8
+        dy = (self.y2 - self.y1) / 8
+        points = []
+        points.append(qtc.QPointF(self.x1, self.y1))
+        for i in range(1, 8):
+            x = self.x1 + i * dx
+            y = self.y1 + i * dy + (self.width / 2 if i % 2 == 0 else -self.width / 2)
+            points.append(qtc.QPointF(x, y))
+        points.append(qtc.QPointF(self.x2, self.y2))
+        painter.drawPolyline(points)
 
 class DashpotItem(qtw.QGraphicsItem):
     def __init__(self, x1, y1, x2, y2, parent=None, pen=None):
@@ -124,7 +132,7 @@ class DashpotItem(qtw.QGraphicsItem):
         if self.pen is not None:
             painter.setPen(self.pen)
         painter.setBrush(qtc.Qt.NoBrush)
-        # Simplified drawing to avoid crashes
+        # Simplified to avoid crash
         painter.drawLine(self.x1, self.y1, self.x2, self.y2)
 
 #endregion
@@ -141,7 +149,7 @@ class CarModel:
         self.yangdeg = 45.0
         self.results = None
 
-        self.m1 = 450.0  # Reset to default
+        self.m1 = 450.0  # Default, but user may change
         self.m2 = 20.0
         self.c1 = 4500.0
         self.k1 = 15000.0
@@ -192,31 +200,34 @@ class CarView:
         self.doPlot(model)
 
     def buildScene(self):
+        print("Building scene")
         self.scene = qtw.QGraphicsScene()
         self.scene.setObjectName("MyScene")
         self.scene.setSceneRect(-200, -200, 400, 400)
 
         self.gv_Schematic.setScene(self.scene)
         self.setupPensAndBrushes()
+        print("Adding wheel")
         self.Wheel = Wheel(0, 50, 50, pen=self.penWheel, wheelBrush=self.brushWheel, massBrush=self.brushMass, name="Wheel", mass=20)
-        self.CarBody = MassBlock(0, -70, 100, 30, pen=self.penWheel, brush=self.brushMass, name="Car Body", mass=450)
         self.Wheel.addToScene(self.scene)
+        print("Adding car body")
+        self.CarBody = MassBlock(0, -70, 100, 30, pen=self.penWheel, brush=self.brushMass, name="Car Body", mass=450)
         self.scene.addItem(self.CarBody)
 
-        # Add spring and dashpot with adjusted coordinates
-        spring = SpringItem(0, -40, 0, 50, pen=self.penWheel)  # From car body to wheel
-        dashpot = DashpotItem(20, -40, 20, 50, pen=self.penWheel)  # Offset to avoid overlap
+        print("Adding spring")
+        spring = SpringItem(0, -40, 0, 50, pen=self.penWheel)
         self.scene.addItem(spring)
+        print("Adding dashpot")
+        dashpot = DashpotItem(20, -40, 20, 50, pen=self.penWheel)
         self.scene.addItem(dashpot)
-
-        # Add tire spring (k2) between wheel and ground
+        print("Adding tire spring")
         tire_spring = SpringItem(0, 100, 0, 150, pen=self.penWheel)
         self.scene.addItem(tire_spring)
-
-        # Add ground
+        print("Adding ground")
         ground = qtw.QGraphicsLineItem(-150, 150, 150, 150)
         ground.setPen(self.penWheel)
         self.scene.addItem(ground)
+        print("Scene built successfully")
 
     def setupPensAndBrushes(self):
         self.penWheel = qtg.QPen(qtg.QColor("orange"))
@@ -244,13 +255,7 @@ class CarView:
             else:
                 yroad[i] = model.ymag
 
-        # Ensure positive values for logarithmic scales
-        ycar_min = np.min(ycar[ycar > 0]) if np.any(ycar > 0) else 1e-6
-        ywheel_min = np.min(ywheel[ywheel > 0]) if np.any(ywheel > 0) else 1e-6
-        yroad_min = np.min(yroad[yroad > 0]) if np.any(yroad > 0) else 1e-6
-        accel_min = np.min(accel[accel > 0]) if np.any(accel > 0) else 1e-6
-        accel_max = np.max(accel) if np.any(accel) else 1e-6
-
+        # Set x-axis limits and scale
         if self.chk_LogX.isChecked():
             ax.set_xlim(max(1e-6, t.min()), t.max())
             ax.set_xscale('log')
@@ -258,34 +263,43 @@ class CarView:
             ax.set_xlim(0.0, model.tmax)
             ax.set_xscale('linear')
 
+        # Set y-axis limits and scale for positions
+        ycar_min = np.min(ycar[ycar > 0]) if np.any(ycar > 0) else 1e-6
+        ywheel_min = np.min(ywheel[ywheel > 0]) if np.any(ywheel > 0) else 1e-6
+        yroad_min = np.min(yroad[yroad > 0]) if np.any(yroad > 0) else 1e-6
+        y_max = max(ycar.max(), ywheel.max(), yroad.max())
+        y_min = min(ycar.min(), ywheel.min(), yroad.min())
+
         if self.chk_LogY.isChecked():
-            ax.set_ylim(min(ycar_min, ywheel_min, yroad_min) / 1.05,
-                       max(ycar.max(), ywheel.max(), yroad.max()) * 1.05)
+            ax.set_ylim(ycar_min / 1.05, y_max * 1.05)
             ax.set_yscale('log')
         else:
-            ax.set_ylim(min(ycar.min(), ywheel.min(), yroad.min()) / 1.05,
-                       max(ycar.max(), ywheel.max(), yroad.max()) * 1.05)
+            ax.set_ylim(y_min / 1.05, y_max * 1.05)
             ax.set_yscale('linear')
 
+        # Plot position data
         ax.plot(t, ycar, 'b-', label='Body Position')
         ax.plot(t, ywheel, 'r-', label='Wheel Position')
         ax.plot(t, yroad, 'k--', label='Road Profile')
+
+        # Plot acceleration if checked
         if self.chk_ShowAccel.isChecked() and accel is not None:
-            ax1.plot(t, accel, 'g-', label='Body Accel')  # Ensure label is set
-            ax1.axhline(y=accel.max(), color='orange', linestyle='--')
+            accel_min = np.min(accel[accel > 0]) if np.any(accel > 0) else 1e-6
+            accel_max = np.max(accel) if np.any(accel) else 1e-6
             if self.chk_LogAccel.isChecked():
                 ax1.set_ylim(accel_min / 1.05, max(accel_max, model.accelLim) * 1.05)
                 ax1.set_yscale('log')
             else:
                 ax1.set_ylim(min(accel.min(), -model.accelLim) / 1.05, max(accel_max, model.accelLim) * 1.05)
                 ax1.set_yscale('linear')
+            ax1.plot(t, accel, 'g-', label='Body Accel')
+            ax1.axhline(y=accel.max(), color='orange', linestyle='--')
+            ax1.set_ylabel("Y'' (g)", fontsize='large')
+            ax1.legend(loc='upper right')
 
         ax.set_ylabel("Vertical Position (m)", fontsize='large')
         ax.set_xlabel("time (s)", fontsize='large')
-        ax1.set_ylabel("Y'' (g)", fontsize='large')
         ax.legend(loc='upper left')
-        if self.chk_ShowAccel.isChecked() and accel is not None:
-            ax1.legend(loc='upper right')
 
         ax.axvline(x=model.tramp)
         ax.axhline(y=model.ymag)
@@ -397,19 +411,20 @@ class CarController:
         for i in range(N):
             if i == N-1:
                 h = self.model.t[i] - self.model.t[i-1]
-                self.model.accel[i] = (vel[i] - vel[i-1]) / (9.81 * h)
+                self.model.accel[i] = (vel[i] - vel[i-1]) / (9.81 * h) + 1e-6
             else:
                 h = self.model.t[i + 1] - self.model.t[i]
-                self.model.accel[i] = (vel[i + 1] - vel[i]) / (9.81 * h)
+                self.model.accel[i] = (vel[i + 1] - vel[i]) / (9.81 * h) + 1e-6
         self.model.accelMax = self.model.accel.max()
         return True
 
     def OptimizeSuspension(self):
         self.calculate(doCalc=False)
-        x0 = np.array([max(self.model.mink1, min(self.model.k1, self.model.maxk1)),
+        x0 = np.array([(self.model.mink1 + self.model.maxk1) / 2,  # Middle of k1 range
                       max(10, self.model.c1),
-                      max(self.model.mink2, min(self.model.k2, self.model.maxk2))])
-        answer = minimize(self.SSE, x0, method='Nelder-Mead')
+                      (self.model.mink2 + self.model.maxk2) / 2])  # Middle of k2 range
+        bounds = [(self.model.mink1, self.model.maxk1), (10, None), (self.model.mink2, self.model.maxk2)]
+        answer = minimize(self.SSE, x0, method='L-BFGS-B', bounds=bounds)
         self.model.k1, self.model.c1, self.model.k2 = answer.x
         self.doCalc()
         self.view.updateView(self.model)
@@ -432,15 +447,8 @@ class CarController:
             SSE += (y - ytarget) ** 2
 
         if optimizing:
-            if k1 < self.model.mink1 or k1 > self.model.maxk1:
-                SSE += 1e8 * (max(self.model.mink1 - k1, 0) + max(k1 - self.model.maxk1, 0))  # Increased penalty
-            if c1 < 10:
-                SSE += 1e8 * max(10 - c1, 0)
-            if k2 < self.model.mink2 or k2 > self.model.maxk2:
-                SSE += 1e8 * (max(self.model.mink2 - k2, 0) + max(k2 - self.model.maxk2, 0))
-
             if self.model.accelMax > self.model.accelLim and self.chk_IncludeAccel.isChecked():
-                SSE += 1e8 * (self.model.accelMax - self.model.accelLim) ** 2
+                SSE += 1e10 * (self.model.accelMax - self.model.accelLim) ** 2
 
         self.model.SSE = SSE
         return SSE
