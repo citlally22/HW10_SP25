@@ -100,6 +100,7 @@ class SpringItem(qtw.QGraphicsItem):
                          abs(self.x2 - self.x1) + self.width, abs(self.y2 - self.y1) + self.width)
 
     def paint(self, painter, option, widget=None):
+        print("Painting SpringItem")
         if self.pen is not None:
             painter.setPen(self.pen)
         painter.setBrush(qtc.Qt.NoBrush)
@@ -109,31 +110,37 @@ class SpringItem(qtw.QGraphicsItem):
         points.append(qtc.QPointF(self.x1, self.y1))
         for i in range(1, 8):
             x = self.x1 + i * dx
-            y = self.y1 + i * dy + (self.width / 2 if i % 2 == 0 else -self.width / 2)
+            y = self.y1 + i * dy + (self.width/2 if i % 2 == 0 else -self.width/2)
             points.append(qtc.QPointF(x, y))
         points.append(qtc.QPointF(self.x2, self.y2))
         painter.drawPolyline(points)
 
-class DashpotItem(qtw.QGraphicsItem):
+class DashpotItem:
     def __init__(self, x1, y1, x2, y2, parent=None, pen=None):
-        super().__init__(parent)
+        self.items = []
         self.x1, self.y1 = x1, y1
         self.x2, self.y2 = x2, y2
         self.pen = pen
         self.length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
         self.width = 10
-        self.transformation = qtg.QTransform()
 
-    def boundingRect(self):
-        return qtc.QRectF(min(self.x1, self.x2) - self.width, min(self.y1, self.y2),
-                         abs(self.x2 - self.x1) + 2*self.width, abs(self.y2 - self.y1) + self.width)
-
-    def paint(self, painter, option, widget=None):
+    def addToScene(self, scene):
+        mid_x = (self.x1 + self.x2) / 2
+        mid_y = (self.y1 + self.y2) / 2
+        # Add two lines
+        line1 = qtw.QGraphicsLineItem(self.x1, self.y1, mid_x, mid_y)
+        line2 = qtw.QGraphicsLineItem(mid_x, mid_y, self.x2, self.y2)
+        # Add a small rectangle in the middle
+        rect = qtw.QGraphicsRectItem(mid_x - self.width/4, mid_y - self.width/4, self.width/2, self.width/2)
+        # Set the pen for all items
         if self.pen is not None:
-            painter.setPen(self.pen)
-        painter.setBrush(qtc.Qt.NoBrush)
-        # Simplified to avoid crash
-        painter.drawLine(self.x1, self.y1, self.x2, self.y2)
+            line1.setPen(self.pen)
+            line2.setPen(self.pen)
+            rect.setPen(self.pen)
+        # Add items to the scene
+        self.items = [line1, line2, rect]
+        for item in self.items:
+            scene.addItem(item)
 
 #endregion
 
@@ -219,7 +226,7 @@ class CarView:
         self.scene.addItem(spring)
         print("Adding dashpot")
         dashpot = DashpotItem(20, -40, 20, 50, pen=self.penWheel)
-        self.scene.addItem(dashpot)
+        dashpot.addToScene(self.scene)
         print("Adding tire spring")
         tire_spring = SpringItem(0, 100, 0, 150, pen=self.penWheel)
         self.scene.addItem(tire_spring)
@@ -420,12 +427,48 @@ class CarController:
 
     def OptimizeSuspension(self):
         self.calculate(doCalc=False)
-        x0 = np.array([(self.model.mink1 + self.model.maxk1) / 2,  # Middle of k1 range
-                      max(10, self.model.c1),
-                      (self.model.mink2 + self.model.maxk2) / 2])  # Middle of k2 range
-        bounds = [(self.model.mink1, self.model.maxk1), (10, None), (self.model.mink2, self.model.maxk2)]
-        answer = minimize(self.SSE, x0, method='L-BFGS-B', bounds=bounds)
-        self.model.k1, self.model.c1, self.model.k2 = answer.x
+        print(f"Initial values: k1 = {self.model.k1}, c1 = {self.model.c1}, k2 = {self.model.k2}")
+        print(f"Optimization bounds: k1 = ({self.model.mink1}, {self.model.maxk1}), c1 = (10, 10000), k2 = ({self.model.mink2}, {self.model.maxk2})")
+
+        # Normalize parameters to [0, 1] for better numerical stability
+        k1_range = self.model.maxk1 - self.model.mink1
+        c1_range = 10000 - 10  # Assume c1 upper bound of 10000
+        k2_range = self.model.maxk2 - self.model.mink2
+
+        # Initial guess in normalized space
+        x0 = np.array([
+            (self.model.k1 - self.model.mink1) / k1_range,
+            (self.model.c1 - 10) / c1_range,
+            (self.model.k2 - self.model.mink2) / k2_range
+        ])
+        bounds = [(0, 1), (0, 1), (0, 1)]
+
+        def normalized_SSE(x):
+            k1 = self.model.mink1 + x[0] * k1_range
+            c1 = 10 + x[1] * c1_range
+            k2 = self.model.mink2 + x[2] * k2_range
+            return self.SSE((k1, c1, k2), optimizing=True)
+
+        def callback(x):
+            k1 = self.model.mink1 + x[0] * k1_range
+            c1 = 10 + x[1] * c1_range
+            k2 = self.model.mink2 + x[2] * k2_range
+            print(f"Optimization step: k1 = {k1}, c1 = {c1}, k2 = {k2}")
+
+        print(f"Starting optimization with normalized x0 = {x0}")
+        answer = minimize(normalized_SSE, x0, method='SLSQP', bounds=bounds, callback=callback, options={'maxiter': 1000, 'disp': True})
+        print(f"Optimization result: success = {answer.success}, message = {answer.message}")
+
+        # Denormalize the results
+        self.model.k1 = self.model.mink1 + answer.x[0] * k1_range
+        self.model.c1 = 10 + answer.x[1] * c1_range
+        self.model.k2 = self.model.mink2 + answer.x[2] * k2_range
+
+        # Clamp values to bounds (shouldn't be necessary with SLSQP, but just in case)
+        self.model.k1 = max(self.model.mink1, min(self.model.maxk1, self.model.k1))
+        self.model.k2 = max(self.model.mink2, min(self.model.maxk2, self.model.k2))
+        self.model.c1 = max(10, min(10000, self.model.c1))
+        print(f"Final optimized values: k1 = {self.model.k1}, c1 = {self.model.c1}, k2 = {self.model.k2}")
         self.doCalc()
         self.view.updateView(self.model)
 
@@ -448,7 +491,16 @@ class CarController:
 
         if optimizing:
             if self.model.accelMax > self.model.accelLim and self.chk_IncludeAccel.isChecked():
-                SSE += 1e10 * (self.model.accelMax - self.model.accelLim) ** 2
+                SSE += 1e12 * (self.model.accelMax - self.model.accelLim) ** 2
+            # Strong penalty for bounds violation
+            if k1 < self.model.mink1:
+                SSE += 1e15 * (self.model.mink1 - k1) ** 2
+            if k1 > self.model.maxk1:
+                SSE += 1e15 * (k1 - self.model.maxk1) ** 2
+            if k2 < self.model.mink2:
+                SSE += 1e15 * (self.model.mink2 - k2) ** 2
+            if k2 > self.model.maxk2:
+                SSE += 1e15 * (k2 - self.model.maxk2) ** 2
 
         self.model.SSE = SSE
         return SSE

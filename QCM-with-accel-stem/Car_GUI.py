@@ -272,6 +272,17 @@ class Ui_Form(object):
         self.layout_horizontal_main.setObjectName("layout_horizontal_main")
         self.horizontalLayout.addLayout(self.layout_horizontal_main)
 
+        # --- Make all input boxes wider so numbers are fully visible ---
+        self.le_m1.setFixedWidth(120)
+        self.le_v.setFixedWidth(120)
+        self.le_k1.setFixedWidth(120)
+        self.le_c1.setFixedWidth(120)
+        self.le_m2.setFixedWidth(120)
+        self.le_k2.setFixedWidth(140)
+        self.le_ang.setFixedWidth(120)
+        self.le_tmax.setFixedWidth(120)
+        # ---------------------------------------------------------------
+
         self.retranslateUi(Form)
         QtCore.QMetaObject.connectSlotsByName(Form)
 
