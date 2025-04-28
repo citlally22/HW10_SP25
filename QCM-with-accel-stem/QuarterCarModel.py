@@ -706,58 +706,45 @@ class CarController:
 
     def OptimizeSuspension(self):
         """Optimize suspension parameters (k1, c1, k2) to minimize SSE."""
-        # Update model parameters without simulation
         self.calculate(doCalc=False)
-        print(f"Initial values: k1 = {self.model.k1}, c1 = {self.model.c1}, k2 = {self.model.k2}")
-        print(
-            f"Optimization bounds: k1 = ({self.model.mink1}, {self.model.maxk1}), c1 = (10, 10000), k2 = ({self.model.mink2}, {self.model.maxk2})")
 
-        # Normalize parameters to [0, 1]
         k1_range = self.model.maxk1 - self.model.mink1
         c1_range = 10000 - 10
         k2_range = self.model.maxk2 - self.model.mink2
 
-        # Set initial guess in normalized space
         x0 = np.array([
             (self.model.k1 - self.model.mink1) / k1_range,
             (self.model.c1 - 10) / c1_range,
             (self.model.k2 - self.model.mink2) / k2_range
         ])
-        bounds = [(0, 1), (0, 1), (0, 1)]
 
         def normalized_SSE(x):
-            """Calculate SSE for normalized parameters."""
             k1 = self.model.mink1 + x[0] * k1_range
             c1 = 10 + x[1] * c1_range
             k2 = self.model.mink2 + x[2] * k2_range
             return self.SSE((k1, c1, k2), optimizing=True)
 
         def callback(x):
-            """Print optimization progress."""
             k1 = self.model.mink1 + x[0] * k1_range
             c1 = 10 + x[1] * c1_range
             k2 = self.model.mink2 + x[2] * k2_range
             print(f"Optimization step: k1 = {k1}, c1 = {c1}, k2 = {k2}")
 
         print(f"Starting optimization with normalized x0 = {x0}")
-        # Perform optimization
-        answer = minimize(normalized_SSE, x0, method='SLSQP', bounds=bounds, callback=callback,
+        answer = minimize(normalized_SSE, x0, method='Nelder-Mead',
                           options={'maxiter': 1000, 'disp': True})
         print(f"Optimization result: success = {answer.success}, message = {answer.message}")
 
-        # Denormalize results
         self.model.k1 = self.model.mink1 + answer.x[0] * k1_range
         self.model.c1 = 10 + answer.x[1] * c1_range
         self.model.k2 = self.model.mink2 + answer.x[2] * k2_range
 
-        # Clamp values to bounds
         self.model.k1 = max(self.model.mink1, min(self.model.maxk1, self.model.k1))
         self.model.k2 = max(self.model.mink2, min(self.model.maxk2, self.model.k2))
         self.model.c1 = max(10, min(10000, self.model.c1))
-        print(f"Final optimized values: k1 = {self.model.k1}, c1 = {self.model.c1}, k2 = {self.model.k2}")
-        # Perform final simulation
+
+        self.chk_ShowAccel.setChecked(True)  # Always show acceleration plot after optimization
         self.doCalc()
-        # Update view
         self.view.updateView(self.model)
 
     def SSE(self, vals, optimizing=True):
@@ -812,5 +799,4 @@ class CarController:
         """Update the plot with current simulation results."""
         self.view.doPlot(self.model)
 
-# endregion
 # endregion
